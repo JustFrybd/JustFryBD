@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Just Fry অ্যাডমিন</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--y:#fbc51b;--ink:#241a0d;--mut:#6f6455;--bg:#fffdf6;--line:#e8dfc8;--ok:#1f7a3d;--bad:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Noto Sans Bengali',system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+header{background:var(--y);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+header h1{font-size:18px;margin:0}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--ink);background:#fff;color:var(--ink);padding:8px 14px;min-height:44px}
+button.main{background:var(--ink);color:#fff}
+button.danger{border-color:var(--bad);color:var(--bad)}
+input{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-height:44px}
+input:focus,button:focus-visible{outline:3px solid var(--y);outline-offset:1px}
+main{max-width:640px;margin:0 auto;padding:16px}
+#login{max-width:360px;margin:12vh auto;padding:0 16px}
+#login label{display:block;margin:12px 0 4px;font-weight:600}
+#login button{width:100%;margin-top:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.card.off{background:#f3efe4}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.row label{font-size:13px;color:var(--mut);display:block}
+.top{display:flex;gap:8px;align-items:center}
+.top input{font-weight:700}
+.btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btns button{flex:1}
+.stock{color:var(--ok);border-color:var(--ok)}
+.card.off .stock{color:var(--bad);border-color:var(--bad)}
+#msg{position:fixed;left:12px;right:12px;bottom:12px;padding:12px;border-radius:10px;background:var(--ink);color:#fff;display:none;text-align:center;z-index:9}
+h2{font-size:17px;margin:20px 0 8px}
+.hint{color:var(--mut);font-size:14px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>🍟 Just Fry অ্যাডমিন</h1>
+  <p class="hint">পণ্য ও দাম বদলাতে লগইন করুন।</p>
+  <label for="em">ইমেইল</label>
+  <input id="em" type="email" autocomplete="username">
+  <label for="pw">পাসওয়ার্ড</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <button class="main" id="go">লগইন করুন</button>
+</div>
+
+<div id="app" hidden>
+  <header><h1>🍟 Just Fry অ্যাডমিন</h1><button id="out">লগআউট</button></header>
+  <main>
+    <p class="hint">দাম বা নাম বদলে "সেভ করুন" চাপলে ওয়েবসাইটে আপডেট হবে।</p>
+    <div id="list"></div>
+    <h2>নতুন পণ্য যোগ করুন</h2>
+    <div class="card">
+      <input id="n-name" placeholder="পণ্যের নাম (যেমন: চিকেন পিৎজা)">
+      <div class="row">
+        <div><label for="n-qty">পরিমাণ</label><input id="n-qty" placeholder="১০ পিস"></div>
+        <div><label for="n-price">দাম (৳)</label><input id="n-price" type="number" inputmode="numeric"></div>
+        <div><label for="n-cat">ক্যাটেগরি</label><input id="n-cat" placeholder="স্ন্যাকস"></div>
+        <div><label for="n-emoji">ইমোজি</label><input id="n-emoji" placeholder="🍕"></div>
+      </div>
+      <div class="btns"><button class="main" id="add">পণ্য যোগ করুন</button></div>
+    </div>
+  </main>
+</div>
+<div id="msg" role="status"></div>
+
+<script>
+const URL_ = "https://owfljgcntyfqdapohpgw.supabase.co";
+const KEY = "sb_publishable_I7IiwQxSpMn8lAz5XfZ08A_6pTo0K1H";
+let token = sessionStorage.getItem("jf_token");
+const $ = id => document.getElementById(id);
+
+function say(t){const m=$("msg");m.textContent=t;m.style.display="block";clearTimeout(say.t);say.t=setTimeout(()=>m.style.display="none",2800)}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+async function api(path, opt={}){
+  const r = await fetch(URL_+path,{...opt,headers:{apikey:KEY,Authorization:"Bearer "+(token||KEY),"Content-Type":"application/json",Prefer:"return=minimal",...(opt.headers||{})}});
+  if(r.status===401||r.status===403){ if(token){logout();say("আবার লগইন করুন");} throw new Error("auth"); }
+  if(!r.ok) throw new Error(await r.text());
+  const t = await r.text(); return t?JSON.parse(t):null;
+}
+
+async function login(){
+  const email=$("em").value.trim(), password=$("pw").value;
+  if(!email||!password) return say("ইমেইল ও পাসওয়ার্ড দিন");
+  let r, d;
+  try{
+    r = await fetch(URL_+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:KEY,"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+    d = await r.json();
+  }catch(e){ return say("সার্ভারের সাথে যোগাযোগ হচ্ছে না (প্রিভিউতে ব্লক হতে পারে)") }
+  if(!r.ok||!d.access_token) return say("ইমেইল বা পাসওয়ার্ড ঠিক নয়");
+  token=d.access_token; sessionStorage.setItem("jf_token",token); show();
+}
+function logout(){token=null;sessionStorage.removeItem("jf_token");$("app").hidden=true;$("login").hidden=false;$("pw").value=""}
+function show(){$("login").hidden=true;$("app").hidden=false;load()}
+
+async function load(){
+  try{
+    const rows = await fetch(URL_+"/rest/v1/products?select=*&order=id",{headers:{apikey:KEY,Authorization:"Bearer "+token}}).then(r=>r.json());
+    $("list").innerHTML = rows.map(p=>`
+    <div class="card ${p.in_stock?"":"off"}" data-id="${p.id}">
+      <div class="top"><span style="font-size:28px">${esc(p.emoji)}</span><input class="f-name" value="${esc(p.name)}" aria-label="নাম"></div>
+      <div class="row">
+        <div><label>পরিমাণ</label><input class="f-qty" value="${esc(p.quantity)}"></div>
+        <div><label>দাম (৳)</label><input class="f-price" type="number" inputmode="numeric" value="${p.price}"></div>
+      </div>
+      <div class="btns">
+        <button class="main sv">সেভ করুন</button>
+        <button class="stock st">${p.in_stock?"স্টকে আছে":"স্টক শেষ"}</button>
+        <button class="danger dl">মুছুন</button>
+      </div>
+    </div>`).join("");
+  }catch(e){say("তালিকা আনা যায়নি")}
+}
+
+$("list").addEventListener("click",async e=>{
+  const card=e.target.closest(".card"); if(!card) return;
+  const id=card.dataset.id, q=s=>card.querySelector(s);
+  try{
+    if(e.target.classList.contains("sv")){
+      const price=parseInt(q(".f-price").value,10);
+      if(!q(".f-name").value.trim()||isNaN(price)) return say("নাম ও দাম ঠিকভাবে দিন");
+      await api("/rest/v1/products?id=eq."+id,{method:"PATCH",body:JSON.stringify({name:q(".f-name").value.trim(),quantity:q(".f-qty").value.trim(),price})});
+      say("সেভ হয়েছে ✓");
+    }else if(e.target.classList.contains("st")){
+      const nowOn = card.classList.contains("off");
+      await api("/rest/v1/products?id=eq."+id,{method:"PATCH",body:JSON.stringify({in_stock:nowOn})});
+      say(nowOn?"স্টকে আছে ✓":"স্টক শেষ করা হলো"); load();
+    }else if(e.target.classList.contains("dl")){
+      if(!confirm("এই পণ্যটা সত্যিই মুছবেন?")) return;
+      await api("/rest/v1/products?id=eq."+id,{method:"DELETE"});
+      say("মুছে ফেলা হয়েছে"); load();
+    }
+  }catch(err){ if(err.message!=="auth") say("কাজ হয়নি, আবার চেষ্টা করুন") }
+});
+
+$("add").onclick=async()=>{
+  const name=$("n-name").value.trim(), price=parseInt($("n-price").value,10);
+  if(!name||isNaN(price)) return say("নাম ও দাম দিন");
+  try{
+    await api("/rest/v1/products",{method:"POST",body:JSON.stringify({name,quantity:$("n-qty").value.trim(),price,category:$("n-cat").value.trim(),emoji:$("n-emoji").value.trim()||"🍽️"})});
+    ["n-name","n-qty","n-price","n-cat","n-emoji"].forEach(i=>$(i).value="");
+    say("নতুন পণ্য যোগ হয়েছে ✓"); load();
+  }catch(err){ if(err.message!=="auth") say("যোগ করা যায়নি") }
+};
+
+$("go").onclick=login;
+$("pw").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
+$("out").onclick=logout;
+if(token) show();
+</script>
+</body>
+</html>
