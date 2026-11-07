@@ -27,6 +27,8 @@ main{max-width:640px;margin:0 auto;padding:16px}
 .row label{font-size:13px;color:var(--mut);display:block}
 .top{display:flex;gap:8px;align-items:center}
 .top input{font-weight:700}
+.pic{width:56px;height:56px;flex:none;display:flex;align-items:center;justify-content:center;font-size:28px;border-radius:8px;background:#f3efe4;overflow:hidden}
+.pic img{width:100%;height:100%;object-fit:cover;display:block}
 .btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .btns button{flex:1}
 .stock{color:var(--ok);border-color:var(--ok)}
@@ -51,7 +53,7 @@ h2{font-size:17px;margin:20px 0 8px}
 <div id="app" hidden>
   <header><h1>🍟 Just Fry অ্যাডমিন</h1><button id="out">লগআউট</button></header>
   <main>
-    <p class="hint">দাম বা নাম বদলে "সেভ করুন" চাপলে ওয়েবসাইটে আপডেট হবে।</p>
+    <p class="hint">দাম বা নাম বদলে "সেভ করুন" চাপলে ওয়েবসাইটে আপডেট হবে। ছবি বদলাতে "ছবি বদলান" চাপুন।</p>
     <div id="list"></div>
     <h2>নতুন পণ্য যোগ করুন</h2>
     <div class="card">
@@ -66,12 +68,15 @@ h2{font-size:17px;margin:20px 0 8px}
     </div>
   </main>
 </div>
+<input type="file" id="file" accept="image/*" hidden>
 <div id="msg" role="status"></div>
 
 <script>
 const URL_ = "https://owfljgcntyfqdapohpgw.supabase.co";
 const KEY = "sb_publishable_I7IiwQxSpMn8lAz5XfZ08A_6pTo0K1H";
+const BUCKET = "Food%20image";
 let token = sessionStorage.getItem("jf_token");
+let pendingId = null;
 const $ = id => document.getElementById(id);
 
 function say(t){const m=$("msg");m.textContent=t;m.style.display="block";clearTimeout(say.t);say.t=setTimeout(()=>m.style.display="none",2800)}
@@ -103,13 +108,14 @@ async function load(){
     const rows = await fetch(URL_+"/rest/v1/products?select=*&order=id",{headers:{apikey:KEY,Authorization:"Bearer "+token}}).then(r=>r.json());
     $("list").innerHTML = rows.map(p=>`
     <div class="card ${p.in_stock?"":"off"}" data-id="${p.id}">
-      <div class="top"><span style="font-size:28px">${esc(p.emoji)}</span><input class="f-name" value="${esc(p.name)}" aria-label="নাম"></div>
+      <div class="top"><span class="pic">${p.image_url?`<img src="${esc(p.image_url)}" alt="">`:esc(p.emoji)}</span><input class="f-name" value="${esc(p.name)}" aria-label="নাম"></div>
       <div class="row">
         <div><label>পরিমাণ</label><input class="f-qty" value="${esc(p.quantity)}"></div>
         <div><label>দাম (৳)</label><input class="f-price" type="number" inputmode="numeric" value="${p.price}"></div>
       </div>
       <div class="btns">
         <button class="main sv">সেভ করুন</button>
+        <button class="pb">📷 ছবি বদলান</button>
         <button class="stock st">${p.in_stock?"স্টকে আছে":"স্টক শেষ"}</button>
         <button class="danger dl">মুছুন</button>
       </div>
@@ -117,11 +123,47 @@ async function load(){
   }catch(e){say("তালিকা আনা যায়নি")}
 }
 
+function shrink(file){
+  return new Promise((res,rej)=>{
+    const img=new Image(), u=URL.createObjectURL(file);
+    img.onload=()=>{
+      const s=Math.min(1,800/Math.max(img.width,img.height));
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*s); c.height=Math.round(img.height*s);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(u);
+      c.toBlob(b=>b?res(b):rej(new Error("resize")),"image/jpeg",0.82);
+    };
+    img.onerror=()=>rej(new Error("resize"));
+    img.src=u;
+  });
+}
+
+async function uploadImage(id,file){
+  say("ছবি আপলোড হচ্ছে...");
+  try{
+    const blob=await shrink(file);
+    const path="p"+id+"-"+Date.now()+".jpg";
+    const r=await fetch(URL_+"/storage/v1/object/"+BUCKET+"/"+path,{method:"POST",headers:{apikey:KEY,Authorization:"Bearer "+token,"Content-Type":"image/jpeg","x-upsert":"true"},body:blob});
+    if(!r.ok){ if(r.status===401){logout();return say("আবার লগইন করুন");} throw new Error(await r.text()); }
+    const url=URL_+"/storage/v1/object/public/"+BUCKET+"/"+path;
+    await api("/rest/v1/products?id=eq."+id,{method:"PATCH",body:JSON.stringify({image_url:url})});
+    say("ছবি বদলে গেছে ✓"); load();
+  }catch(err){ if(err.message!=="auth") say("ছবি আপলোড হয়নি, আবার চেষ্টা করুন") }
+}
+
+$("file").addEventListener("change",e=>{
+  const f=e.target.files[0]; e.target.value="";
+  if(f&&pendingId) uploadImage(pendingId,f);
+});
+
 $("list").addEventListener("click",async e=>{
   const card=e.target.closest(".card"); if(!card) return;
   const id=card.dataset.id, q=s=>card.querySelector(s);
   try{
-    if(e.target.classList.contains("sv")){
+    if(e.target.classList.contains("pb")){
+      pendingId=id; $("file").click();
+    }else if(e.target.classList.contains("sv")){
       const price=parseInt(q(".f-price").value,10);
       if(!q(".f-name").value.trim()||isNaN(price)) return say("নাম ও দাম ঠিকভাবে দিন");
       await api("/rest/v1/products?id=eq."+id,{method:"PATCH",body:JSON.stringify({name:q(".f-name").value.trim(),quantity:q(".f-qty").value.trim(),price})});
